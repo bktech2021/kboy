@@ -1,3 +1,5 @@
+// TODO: Move SP to registers
+
 pub enum Reg8 {
     A,
     B,
@@ -14,6 +16,7 @@ pub enum Reg16 {
     BC,
     DE,
     HL,
+    SP,
 }
 
 pub enum Flag {
@@ -32,6 +35,7 @@ pub struct Registers {
     pub F: u8,
     pub H: u8,
     pub L: u8,
+    pub SP: u16,
 }
 
 impl Registers {
@@ -80,6 +84,7 @@ impl Registers {
             Reg16::BC => { (self.B as u16) << 8 | self.C as u16 },
             Reg16::DE => { (self.D as u16) << 8 | self.E as u16 },
             Reg16::HL => { (self.H as u16) << 8 | self.L as u16 },
+            Reg16::SP => self.SP,
         }
     }
 
@@ -89,14 +94,33 @@ impl Registers {
             Reg16::BC => { self.B = (src >> 8) as u8; self.C = src as u8 },
             Reg16::DE => { self.D = (src >> 8) as u8; self.E = src as u8 },
             Reg16::HL => { self.H = (src >> 8) as u8; self.L = src as u8 },
+            Reg16::SP => { self.SP = src },
         };
     }
 
     pub fn get_flag(&self, src: Flag) -> bool {
-        false
+        let m = match src {
+            Flag::Z => 0b10000000,
+            Flag::N => 0b01000000,
+            Flag::H => 0b00100000,
+            Flag::C => 0b00010000,
+        };
+
+        if self.F & m != 0 {
+            true
+        } else { false }
     }
 
     pub fn set_flag(&mut self, src: Flag, dst: bool) {
+        let m = match src {
+            Flag::Z => 0b10000000,
+            Flag::N => 0b01000000,
+            Flag::H => 0b00100000,
+            Flag::C => 0b00010000,
+        };
 
+        if dst {
+            self.F |= m;
+        } else { self.F &= !m; }
     }
 }

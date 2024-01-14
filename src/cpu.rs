@@ -1,7 +1,7 @@
 use crate::memory::Memory;
 use crate::registers::*;
 
-// TODO: Use the registers.rs
+// first make this work, then make this better
 
 #[allow(dead_code)]
 pub struct CPU {
@@ -127,10 +127,10 @@ impl CPU {
                                         }
                                     }
 
-                                    _ => unimplemented!("The condition code {} used in opcode {} is not implemented!", cc, opcode),
+                                    _ => panic!("The condition code {} used in opcode {} is not implemented!", cc, opcode),
                                 }
                             }
-                            _ => unimplemented!("The opcode '{}' is not implemented!", opcode),
+                            _ => panic!("The opcode '{}' is not implemented!", opcode),
                         }
                     }
 
@@ -142,58 +142,63 @@ impl CPU {
                                 let nn_lsb = self.fetch();
                                 let nn_msb = self.fetch();
                                 let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
-                                match p {
-                                    0 => {
-                                        // BC register
-                                        self.reg.set_reg16(Reg16::BC, nn);
-                                    }
+                               
+                                let reg = match p {
+                                    0 => Reg16::BC,
+                                    1 => Reg16::DE,
+                                    2 => Reg16::HL,
+                                    3 => Reg16::SP,
+                                    _ => panic("The register {} used in opcode {} is not implemented!", p, opcode),
+                                };
 
-                                    1 => {
-                                        // DE register
-                                        self.reg.set_reg16(Reg16::DE, nn);
-                                    }
-
-                                    2 => {
-                                        // HL register
-                                        self.reg.set_reg16(Reg16::HL, nn);
-                                    }
-
-                                    3 => {
-                                        // SP register
-                                        self.sp = nn;
-                                    }
-
-                                    _ => unimplemented!("The register {} used in opcode {} is not implemented!", p, opcode),
-                                }
+                                self.reg.set_reg16(reg, nn);
                             }
 
                             1 => {
                                 // ADD HL rr
                                 // Add the value in 16-bit register rr to HL register
-                                match p {
-                                    // BC register
-                                    0 => {}
 
-                                    // DE register 
-                                    1 => {}
+                                let reg = match p {
+                                    0 => Reg16::BC,
+                                    1 => Reg16::DE,
+                                    2 => Reg16::HL,
+                                    3 => Reg16::SP,
+                                    _ => panic!("The register {} used in opcode {} is not implemented!", p, opcode),
+                                };
 
-                                    // HL register 
-                                    2 => {}
+                                let hl = self.reg.get_reg16(Reg16::HL);
+                                let rr = self.reg.get_reg16(reg);
 
-                                    // SP register
-                                    3 => {}
-                                    _ => unimplemented!("The register {} used in opcode {} is not implemented!", p, opcode),
+                                let sum = hl.overflowing_add(rr);
+
+                                // Check half-carry 
+                                if ((hl & 0x0FF + rr & 0x0FFF) & 0x1000) == 0x1000 {
+                                    self.reg.set_flag(Flag::H, true);
+                                } else {
+                                    self.reg.set_flag(Flag::H, false);
                                 }
+
+                                // Check carry
+                                if sum.1 {
+                                    self.reg.set_flag(Flag::C, true);
+                                } else {
+                                    self.reg.set_flag(Flag::C, false);
+                                }
+
+                                // Subtraction flag
+                                self.reg.set_flag(Flag::N, false);
+
+                                self.reg.set_reg16(Reg16::HL, rr);
                             }
 
-                            _ => unimplemented!("The opcode {} is not implemented!", opcode),
+                            _ => panic!("The opcode {} is not implemented!", opcode),
                         }
                     }
 
-                    _ => unimplemented!("The opcode '{}' is not implemented!", opcode),
+                    _ => panic!("The opcode '{}' is not implemented!", opcode),
                 }
             }
-            _ => unimplemented!("The opcode '{}' is not implemented!", opcode),
+            _ => panic!("The opcode '{}' is not implemented!", opcode),
         }
     }
 
