@@ -61,7 +61,7 @@ impl CPU {
                             1 => {
                                 // LD (nn), SP
                                 // Load the data from SP register to 16 bit adress (nn)
-                                
+
                                 let nn_lsb = self.fetch();
                                 let nn_msb = self.fetch();
                                 let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
@@ -72,11 +72,13 @@ impl CPU {
                             2 => {
                                 // STOP
                                 // TODO: Implement that later
-                                unimplemented!("Opcode stop is still not implemented. Please do the work.");
+                                unimplemented!(
+                                    "Opcode stop is still not implemented. Please do the work."
+                                );
                             }
 
                             3 => {
-                                // JR e 
+                                // JR e
                                 // Unconditional jump to releative address specified by signed
                                 // 8-bit opearnd e
                                 let e = self.fetch() as i8;
@@ -89,10 +91,10 @@ impl CPU {
                                 // signed integer
                                 //
                                 // You should fetch e even if condition is false
-                                
+
                                 let e = self.fetch() as i8;
                                 let cc = opcode & 0b00011000;
-                                
+
                                 // Check the condition code Not-Z, Z (Zero), Not-C, or C (Carry)
                                 match cc {
                                     0 => {
@@ -142,13 +144,16 @@ impl CPU {
                                 let nn_lsb = self.fetch();
                                 let nn_msb = self.fetch();
                                 let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
-                               
+
                                 let reg = match p {
                                     0 => Reg16::BC,
                                     1 => Reg16::DE,
                                     2 => Reg16::HL,
                                     3 => Reg16::SP,
-                                    _ => panic("The register {} used in opcode {} is not implemented!", p, opcode),
+                                    _ => panic!(
+                                        "The register {} used in opcode {} is not implemented!",
+                                        p, opcode
+                                    ),
                                 };
 
                                 self.reg.set_reg16(reg, nn);
@@ -163,7 +168,10 @@ impl CPU {
                                     1 => Reg16::DE,
                                     2 => Reg16::HL,
                                     3 => Reg16::SP,
-                                    _ => panic!("The register {} used in opcode {} is not implemented!", p, opcode),
+                                    _ => panic!(
+                                        "The register {} used in opcode {} is not implemented!",
+                                        p, opcode
+                                    ),
                                 };
 
                                 let hl = self.reg.get_reg16(Reg16::HL);
@@ -171,7 +179,7 @@ impl CPU {
 
                                 let sum = hl.overflowing_add(rr);
 
-                                // Check half-carry 
+                                // Check half-carry
                                 if ((hl & 0x0FF + rr & 0x0FFF) & 0x1000) == 0x1000 {
                                     self.reg.set_flag(Flag::H, true);
                                 } else {
@@ -193,6 +201,106 @@ impl CPU {
 
                             _ => panic!("The opcode {} is not implemented!", opcode),
                         }
+                    }
+
+                    2 => {
+                        match q {
+                            // The opcodes where the source is A
+                            0 => {
+                                match p {
+                                    // LD [BC], A
+                                    0 => self.mem.write(
+                                        self.reg.get_reg16(Reg16::BC) as usize,
+                                        self.reg.get_reg8(Reg8::A),
+                                    ),
+
+                                    // LD [DE], A
+                                    1 => self.mem.write(
+                                        self.reg.get_reg16(Reg16::BC) as usize,
+                                        self.reg.get_reg8(Reg8::A),
+                                    ),
+
+                                    // LD [HL+], A
+                                    // Note: increment HL after memory operation
+                                    2 => {
+                                        self.mem.write(
+                                            self.reg.get_reg16(Reg16::HL) as usize,
+                                            self.reg.get_reg8(Reg8::A),
+                                        );
+                                        self.reg.set_reg16(
+                                            Reg16::HL,
+                                            self.reg.get_reg16(Reg16::HL) + 1,
+                                        );
+                                    }
+
+                                    // LD [HL-], A
+                                    // Note: decrement HL after memory operation
+                                    3 => {
+                                        self.mem.write(
+                                            self.reg.get_reg16(Reg16::HL) as usize,
+                                            self.reg.get_reg8(Reg8::A),
+                                        );
+                                        self.reg.set_reg16(
+                                            Reg16::HL,
+                                            self.reg.get_reg16(Reg16::HL) - 1,
+                                        );
+                                    }
+
+                                    _ => panic!("The opcode {} is not implemented!", opcode),
+                                }
+                            }
+
+                            // The opcodes where destination is A
+                            1 => {
+                                match p {
+                                    // LD A, [BC]
+                                    0 => self.reg.set_reg8(
+                                        Reg8::A,
+                                        self.mem.read(self.reg.get_reg16(Reg16::BC)),
+                                    ),
+
+                                    // LD A, [DE]
+                                    1 => self.reg.set_reg8(
+                                        Reg8::A,
+                                        self.mem.read(self.reg.get_reg16(Reg16::DE)),
+                                    ),
+
+                                    // LD A, [HL+]
+                                    // Note: increment HL after memory operation
+                                    2 => {
+                                        self.reg.set_reg8(
+                                            Reg8::A,
+                                            self.mem.read(self.reg.get_reg16(Reg16::HL)),
+                                        );
+                                        self.reg.set_reg16(
+                                            Reg16::HL,
+                                            self.reg.get_reg16(Reg16::HL) + 1,
+                                        );
+                                    }
+
+                                    // LD A, [HL-]
+                                    // Note, decrement HL after memory operations
+                                    3 => {
+                                        self.reg.set_reg8(
+                                            Reg8::A,
+                                            self.mem.read(self.reg.get_reg16(Reg16::HL)),
+                                        );
+                                        self.reg.set_reg16(
+                                            Reg16::HL,
+                                            self.reg.get_reg16(Reg16::HL) - 1,
+                                        );
+                                    }
+
+                                    _ => panic("The opcode {} is not implemented!", opcode),
+                                }
+                            }
+
+                            _ => panic!("The opcode {} is not implemeted!", opcode),
+                        }
+                    }
+
+                    3 => {
+                        match q {}
                     }
 
                     _ => panic!("The opcode '{}' is not implemented!", opcode),
