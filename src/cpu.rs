@@ -256,13 +256,13 @@ impl CPU {
                                     // LD A, [BC]
                                     0 => self.reg.set_reg8(
                                         Reg8::A,
-                                        self.mem.read(self.reg.get_reg16(Reg16::BC)),
+                                        self.mem.read(self.reg.get_reg16(Reg16::BC) as usize),
                                     ),
 
                                     // LD A, [DE]
                                     1 => self.reg.set_reg8(
                                         Reg8::A,
-                                        self.mem.read(self.reg.get_reg16(Reg16::DE)),
+                                        self.mem.read(self.reg.get_reg16(Reg16::DE) as usize),
                                     ),
 
                                     // LD A, [HL+]
@@ -270,7 +270,7 @@ impl CPU {
                                     2 => {
                                         self.reg.set_reg8(
                                             Reg8::A,
-                                            self.mem.read(self.reg.get_reg16(Reg16::HL)),
+                                            self.mem.read(self.reg.get_reg16(Reg16::HL) as usize),
                                         );
                                         self.reg.set_reg16(
                                             Reg16::HL,
@@ -283,7 +283,7 @@ impl CPU {
                                     3 => {
                                         self.reg.set_reg8(
                                             Reg8::A,
-                                            self.mem.read(self.reg.get_reg16(Reg16::HL)),
+                                            self.mem.read(self.reg.get_reg16(Reg16::HL) as usize),
                                         );
                                         self.reg.set_reg16(
                                             Reg16::HL,
@@ -291,7 +291,7 @@ impl CPU {
                                         );
                                     }
 
-                                    _ => panic("The opcode {} is not implemented!", opcode),
+                                    _ => panic!("The opcode {} is not implemented!", opcode),
                                 }
                             }
 
@@ -300,7 +300,145 @@ impl CPU {
                     }
 
                     3 => {
-                        match q {}
+                        let reg = match p {
+                            0 => Reg16::BC,
+                            1 => Reg16::DE,
+                            2 => Reg16::HL,
+                            3 => Reg16::SP,
+                            _ => panic!("The opcode {} is not implemented!", opcode),
+                        };
+
+                        match q {
+                            // INC rr
+                            0 => self.reg.set_reg16(reg, self.reg.get_reg16(reg) + 1),
+
+                            // DEC rr
+                            1 => self.reg.set_reg16(reg, self.reg.get_reg16(reg) - 1),
+                            _ => panic!("The opcode {} is not implemented!", opcode),
+                        }
+                    }
+
+                    4 => {
+                        // INC r
+                        if y == 6 {
+                            self.mem.write(
+                                self.reg.get_reg16(Reg16::HL) as usize,
+                                self.mem.read(self.reg.get_reg16(Reg16::HL) as usize) + 1,
+                            );
+                            return;
+                        }
+
+                        let reg = match y {
+                            0 => Reg8::B,
+                            1 => Reg8::C,
+                            2 => Reg8::D,
+                            3 => Reg8::E,
+                            4 => Reg8::H,
+                            5 => Reg8::L,
+                            7 => Reg8::A,
+                            _ => panic!("The opcode {} is not implemented!", opcode),
+                        };
+
+                        self.reg.set_reg8(reg, self.reg.get_reg8(reg) + 1);
+                    }
+
+                    5 => {
+                        // DEC r
+                        if y == 6 {
+                            self.mem.write(
+                                self.reg.get_reg16(Reg16::HL) as usize,
+                                self.mem.read(self.reg.get_reg16(Reg16::HL) as usize) - 1,
+                            );
+                            return;
+                        }
+
+                        let reg = match y {
+                            0 => Reg8::B,
+                            1 => Reg8::C,
+                            2 => Reg8::D,
+                            3 => Reg8::E,
+                            4 => Reg8::H,
+                            5 => Reg8::L,
+                            7 => Reg8::A,
+                            _ => panic!("The opcode {} is not implemented!", opcode),
+                        };
+
+                        self.reg.set_reg8(reg, self.reg.get_reg8(reg) - 1);
+                    }
+
+                    6 => {
+                        // LD r, n
+
+                        let n = self.fetch();
+
+                        if y == 6 {
+                            self.mem
+                                .write(self.reg.get_reg16(Reg16::HL) as usize, n);
+                            return;
+                        }
+
+                        let reg = match y {
+                            0 => Reg8::B,
+                            1 => Reg8::C,
+                            2 => Reg8::D,
+                            3 => Reg8::E,
+                            4 => Reg8::H,
+                            5 => Reg8::L,
+                            7 => Reg8::A,
+                            _ => panic!("The opcode {} is not implemented!", opcode),
+                        };
+
+                        self.reg.set_reg8(reg, n);
+                    }
+
+                    7 => {
+                        match y {
+                            0 => {
+                                // RLCA
+                                let c: bool = (self.reg.get_reg8(Reg8::A) & 0x80) != 0;
+                                let new_a = self.reg.get_reg8(Reg8::A) << 1 | c as u8;
+                                self.reg.set_reg8(Reg8::A, new_a);
+                                self.reg.set_flag(Flag::C, c);
+                                self.reg.set_flag(Flag::Z, false);
+                                self.reg.set_flag(Flag::H, false);
+                                self.reg.set_flag(Flag::N, false);
+                            }
+
+                            1 => {
+                                // RRCA
+                                let c: bool = (self.reg.get_reg8(Reg8::A) & 0x01) != 0;
+                                let new_a = self.reg.get_reg8(Reg8::A) >> 1 | (c as u8) << 7;
+                                self.reg.set_reg8(Reg8::A, new_a);
+                                self.reg.set_flag(Flag::C, c);
+                                self.reg.set_flag(Flag::Z, false);
+                                self.reg.set_flag(Flag::H, false);
+                                self.reg.set_flag(Flag::N, false);
+                            }
+
+                            2 => {
+                                // RLA
+                                let c: bool = (self.reg.get_reg8(Reg8::A) & 0x80) != 0;
+                                let new_a = self.reg.get_reg8(Reg8::A) << 1 | self.reg.get_flag(Flag::C) as u8;
+                                self.reg.set_reg8(Reg8::A, new_a);
+                                self.reg.set_flag(Flag::C, c);
+                                self.reg.set_flag(Flag::Z, false);
+                                self.reg.set_flag(Flag::H, false);
+                                self.reg.set_flag(Flag::N, false);
+                            }
+
+                            3 => {
+                                // RRA
+                                let c: bool = (self.reg.get_reg8(Reg8::A) & 0x01) != 0;
+                                let new_a = self.reg.get_reg8(Reg8::A) >> 1 | (self.reg.get_flag(Flag::C) as u8) << 7;
+                                self.reg.set_reg8(Reg8::A, new_a);
+                                self.reg.set_flag(Flag::C, c);
+                                self.reg.set_flag(Flag::Z, false);
+                                self.reg.set_flag(Flag::H, false);
+                                self.reg.set_flag(Flag::N, false);
+                            }
+
+                            _ => panic!("The opcode {} is not implemented!", opcode),
+                        }
                     }
 
                     _ => panic!("The opcode '{}' is not implemented!", opcode),

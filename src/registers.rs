@@ -1,5 +1,5 @@
 // TODO: Move SP to registers
-
+#[derive(Copy, Clone)]
 pub enum Reg8 {
     A,
     B,
@@ -11,6 +11,7 @@ pub enum Reg8 {
     L,
 }
 
+#[derive(Copy, Clone)]
 pub enum Reg16 {
     AF,
     BC,
@@ -19,6 +20,7 @@ pub enum Reg16 {
     SP,
 }
 
+#[derive(Copy, Clone)]
 pub enum Flag {
     Z,
     N,
@@ -26,6 +28,8 @@ pub enum Flag {
     H,
 }
 
+#[derive(Copy, Clone)]
+#[allow(non_snake_case)]
 pub struct Registers {
     pub A: u8,
     pub B: u8,
