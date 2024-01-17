@@ -60,7 +60,7 @@ impl CPU {
 
                             1 => {
                                 // LD (nn), SP
-                                // Load the data from SP register to 16 bit adress (nn)
+                                // Load the data from SP register to 16 bit address (nn)
 
                                 let nn_lsb = self.fetch();
                                 let nn_msb = self.fetch();
@@ -79,15 +79,15 @@ impl CPU {
 
                             3 => {
                                 // JR e
-                                // Unconditional jump to releative address specified by signed
-                                // 8-bit opearnd e
+                                // Unconditional jump to relative address specified by signed
+                                // 8-bit operand e
                                 let e = self.fetch() as i8;
                                 self.pc = self.pc.wrapping_add_signed(e as i16);
                             }
 
                             4..=7 => {
                                 // JR cc, e
-                                // Conditional jump to releative adress specified by the 8-bit
+                                // Conditional jump to relative address specified by the 8-bit
                                 // signed integer
                                 //
                                 // You should fetch e even if condition is false
@@ -295,7 +295,7 @@ impl CPU {
                                 }
                             }
 
-                            _ => panic!("The opcode {} is not implemeted!", opcode),
+                            _ => panic!("The opcode {} is not implemented!", opcode),
                         }
                     }
 
@@ -372,8 +372,7 @@ impl CPU {
                         let n = self.fetch();
 
                         if y == 6 {
-                            self.mem
-                                .write(self.reg.get_reg16(Reg16::HL) as usize, n);
+                            self.mem.write(self.reg.get_reg16(Reg16::HL) as usize, n);
                             return;
                         }
 
@@ -418,7 +417,8 @@ impl CPU {
                             2 => {
                                 // RLA
                                 let c: bool = (self.reg.get_reg8(Reg8::A) & 0x80) != 0;
-                                let new_a = self.reg.get_reg8(Reg8::A) << 1 | self.reg.get_flag(Flag::C) as u8;
+                                let new_a = self.reg.get_reg8(Reg8::A) << 1
+                                    | self.reg.get_flag(Flag::C) as u8;
                                 self.reg.set_reg8(Reg8::A, new_a);
                                 self.reg.set_flag(Flag::C, c);
                                 self.reg.set_flag(Flag::Z, false);
@@ -429,10 +429,52 @@ impl CPU {
                             3 => {
                                 // RRA
                                 let c: bool = (self.reg.get_reg8(Reg8::A) & 0x01) != 0;
-                                let new_a = self.reg.get_reg8(Reg8::A) >> 1 | (self.reg.get_flag(Flag::C) as u8) << 7;
+                                let new_a = self.reg.get_reg8(Reg8::A) >> 1
+                                    | (self.reg.get_flag(Flag::C) as u8) << 7;
                                 self.reg.set_reg8(Reg8::A, new_a);
                                 self.reg.set_flag(Flag::C, c);
                                 self.reg.set_flag(Flag::Z, false);
+                                self.reg.set_flag(Flag::H, false);
+                                self.reg.set_flag(Flag::N, false);
+                            }
+
+                            4 => {
+                                // DAA
+                                let mut correction = 0;
+                                let src = self.reg.get_reg8(Reg8::A);
+                                if (self.reg.get_flag(Flag::H))
+                                    || !self.reg.get_flag(Flag::N) && ((src & 0x0F) > 0x09)
+                                {
+                                    correction |= 0x06;
+                                }
+                                if (self.reg.get_flag(Flag::C))
+                                    || !self.reg.get_flag(Flag::N) && ((src & 0xFF) > 0x99)
+                                {
+                                    correction |= 0x60;
+                                    self.reg.set_flag(Flag::C, true);
+                                }
+                                if !self.reg.get_flag(Flag::N) {
+                                    self.reg.set_reg8(Reg8::A, src.wrapping_add(correction));
+                                    self.reg
+                                        .set_flag(Flag::Z, src.wrapping_add(correction) == 0);
+                                } else {
+                                    self.reg.set_reg8(Reg8::A, src.wrapping_sub(correction));
+                                    self.reg
+                                        .set_flag(Flag::Z, src.wrapping_sub(correction) == 0);
+                                }
+                                self.reg.set_flag(Flag::H, false);
+                            }
+
+                            5 => {
+                                // CPL
+                                self.reg.set_reg8(Reg8::A, !self.reg.get_reg8(Reg8::A));
+                                self.reg.set_flag(Flag::H, true);
+                                self.reg.set_flag(Flag::N, true);
+                            }
+
+                            6 => {
+                                // SCF
+                                self.reg.set_flag(Flag::C, true);
                                 self.reg.set_flag(Flag::H, false);
                                 self.reg.set_flag(Flag::N, false);
                             }
@@ -443,6 +485,61 @@ impl CPU {
 
                     _ => panic!("The opcode '{}' is not implemented!", opcode),
                 }
+            }
+            1 => {
+                if (z == 6) & (y == 6) {
+                    // LD r, r
+                    if y == 6 {
+                        if z == 6 {
+                            let n = self.mem.read(self.reg.get_reg16(Reg16::HL) as usize);
+                            self.mem.write(self.reg.get_reg16(Reg16::HL) as usize, n);
+                            return;
+                        }
+                        let src = self.mem.read(self.reg.get_reg16(Reg16::HL) as usize);
+                        let dst = match z {
+                            0 => Reg8::B,
+                            1 => Reg8::C,
+                            2 => Reg8::D,
+                            3 => Reg8::E,
+                            4 => Reg8::H,
+                            5 => Reg8::L,
+                            7 => Reg8::A,
+                            _ => panic!("The opcode '{}' is not implemented!", opcode),
+                        };
+                        self.reg.set_reg8(dst, src);
+                        return;
+                    }
+
+                    let src = match y {
+                        0 => Reg8::B,
+                        1 => Reg8::C,
+                        2 => Reg8::D,
+                        3 => Reg8::E,
+                        4 => Reg8::H,
+                        5 => Reg8::L,
+                        7 => Reg8::A,
+                        _ => panic!("The opcode '{}' is not implemented!", opcode),
+                    };
+                    let dst = match z {
+                        0 => Reg8::B,
+                        1 => Reg8::C,
+                        2 => Reg8::D,
+                        3 => Reg8::E,
+                        4 => Reg8::H,
+                        5 => Reg8::L,
+                        7 => Reg8::A,
+                        _ => panic!("The opcode '{}' is not implemented!", opcode),
+                    };
+
+                    self.reg.set_reg8(dst, self.reg.get_reg8(src));
+                    return;
+                }
+
+                // HALT
+                unimplemented!("halt lol");
+            }
+            2 => {
+                // alu[y] r[z]
             }
             _ => panic!("The opcode '{}' is not implemented!", opcode),
         }
