@@ -5,9 +5,7 @@ use crate::registers::*;
 
 #[allow(dead_code)]
 pub struct CPU {
-    sp: u16,
     pc: u16,
-    cc: usize,
     mem: Memory,
     reg: Registers,
 }
@@ -16,9 +14,7 @@ pub struct CPU {
 impl CPU {
     pub fn new() -> CPU {
         CPU {
-            sp: 0xFFFE,
             pc: 0x100,
-            cc: 0,
             mem: Memory::new(0xFFFF),
             reg: Registers::new(),
         }
@@ -37,7 +33,6 @@ impl CPU {
     fn fetch(&mut self) -> u8 {
         let data = self.mem.read(self.pc as usize);
         self.pc += 1;
-        self.cc += 4;
         data
     }
 
@@ -47,6 +42,70 @@ impl CPU {
         let z = opcode & 0b00000111;
         let p = y >> 1;
         let q = y & 0b00000001;
+
+        // For unknown opcode
+        macro_rules! unknown {
+            ($opcode: expr) => {{
+                panic!("The opcode '{}' is not implemented!", opcode);
+            }};
+        }
+
+        macro_rules! check_cc {
+            ($cc: expr) => {{
+                let cc = $cc;
+                match cc {
+                    0 => {
+                        // Condition code Not-Z
+                        let z = self.reg.get_flag(Flag::Z);
+                        !z
+                    }
+
+                    1 => {
+                        // Condition code Z
+                        let z = self.reg.get_flag(Flag::Z);
+                        z
+                    }
+
+                    2 => {
+                        // Condition code Not-C
+                        let c = self.reg.get_flag(Flag::C);
+                        !c
+                    }
+
+                    3 => {
+                        // Condition code C
+                        let c = self.reg.get_flag(Flag::C);
+                        c
+                    }
+
+                    _ => unknown!(opcode),
+                }
+            }};
+        }
+
+        macro_rules! match_rp {
+            ($rr: expr) => {
+                match $rr {
+                    0 => Reg16::BC,
+                    1 => Reg16::DE,
+                    2 => Reg16::HL,
+                    3 => Reg16::SP,
+                    _ => unknown!(opcode),
+                }
+            };
+        }
+
+        macro_rules! match_rp2 {
+            ($rr: expr) => {{
+                match $rr {
+                    0 => Reg16::BC,
+                    1 => Reg16::DE,
+                    2 => Reg16::HL,
+                    3 => Reg16::AF,
+                    _ => unknown!(opcode),
+                }
+            }};
+        }
 
         match x {
             0 => {
@@ -65,8 +124,14 @@ impl CPU {
                                 let nn_lsb = self.fetch();
                                 let nn_msb = self.fetch();
                                 let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
-                                self.mem.write(nn as usize, (self.sp & 0x00FF) as u8);
-                                self.mem.write(nn as usize, ((self.sp & 0xFF00) >> 8) as u8);
+                                self.mem.write(
+                                    nn as usize,
+                                    (self.reg.get_reg16(Reg16::SP) & 0x00FF) as u8,
+                                );
+                                self.mem.write(
+                                    nn as usize,
+                                    ((self.reg.get_reg16(Reg16::SP) & 0xFF00) >> 8) as u8,
+                                );
                             }
 
                             2 => {
@@ -93,46 +158,13 @@ impl CPU {
                                 // You should fetch e even if condition is false
 
                                 let e = self.fetch() as i8;
-                                let cc = opcode & 0b00011000;
 
                                 // Check the condition code Not-Z, Z (Zero), Not-C, or C (Carry)
-                                match cc {
-                                    0 => {
-                                        // Condition code Not-Z
-                                        let z = self.reg.get_flag(Flag::Z);
-                                        if !z {
-                                            self.pc = self.pc.wrapping_add_signed(e as i16);
-                                        }
-                                    }
-
-                                    1 => {
-                                        // Condition code Z
-                                        let z = self.reg.get_flag(Flag::Z);
-                                        if z {
-                                            self.pc = self.pc.wrapping_add_signed(e as i16);
-                                        }
-                                    }
-
-                                    2 => {
-                                        // Condition code Not-C
-                                        let c = self.reg.get_flag(Flag::C);
-                                        if !c {
-                                            self.pc = self.pc.wrapping_add_signed(e as i16);
-                                        }
-                                    }
-
-                                    3 => {
-                                        // Condition code C
-                                        let c = self.reg.get_flag(Flag::C);
-                                        if c {
-                                            self.pc = self.pc.wrapping_add_signed(e as i16);
-                                        }
-                                    }
-
-                                    _ => panic!("The condition code {} used in opcode {} is not implemented!", cc, opcode),
+                                if check_cc!(4 - y) {
+                                    self.pc = self.pc.wrapping_add_signed(e as i16);
                                 }
                             }
-                            _ => panic!("The opcode '{}' is not implemented!", opcode),
+                            _ => unknown!(opcode),
                         }
                     }
 
@@ -145,16 +177,7 @@ impl CPU {
                                 let nn_msb = self.fetch();
                                 let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
 
-                                let reg = match p {
-                                    0 => Reg16::BC,
-                                    1 => Reg16::DE,
-                                    2 => Reg16::HL,
-                                    3 => Reg16::SP,
-                                    _ => panic!(
-                                        "The register {} used in opcode {} is not implemented!",
-                                        p, opcode
-                                    ),
-                                };
+                                let reg = match_rp!(p);
 
                                 self.reg.set_reg16(reg, nn);
                             }
@@ -163,16 +186,7 @@ impl CPU {
                                 // ADD HL rr
                                 // Add the value in 16-bit register rr to HL register
 
-                                let reg = match p {
-                                    0 => Reg16::BC,
-                                    1 => Reg16::DE,
-                                    2 => Reg16::HL,
-                                    3 => Reg16::SP,
-                                    _ => panic!(
-                                        "The register {} used in opcode {} is not implemented!",
-                                        p, opcode
-                                    ),
-                                };
+                                let reg = match_rp!(p);
 
                                 let hl = self.reg.get_reg16(Reg16::HL);
                                 let rr = self.reg.get_reg16(reg);
@@ -187,11 +201,7 @@ impl CPU {
                                 }
 
                                 // Check carry
-                                if sum.1 {
-                                    self.reg.set_flag(Flag::C, true);
-                                } else {
-                                    self.reg.set_flag(Flag::C, false);
-                                }
+                                self.reg.set_flag(Flag::C, sum.1);
 
                                 // Subtraction flag
                                 self.reg.set_flag(Flag::N, false);
@@ -199,7 +209,7 @@ impl CPU {
                                 self.reg.set_reg16(Reg16::HL, rr);
                             }
 
-                            _ => panic!("The opcode {} is not implemented!", opcode),
+                            _ => unknown!(opcode),
                         }
                     }
 
@@ -246,7 +256,7 @@ impl CPU {
                                         );
                                     }
 
-                                    _ => panic!("The opcode {} is not implemented!", opcode),
+                                    _ => unknown!(opcode),
                                 }
                             }
 
@@ -291,22 +301,16 @@ impl CPU {
                                         );
                                     }
 
-                                    _ => panic!("The opcode {} is not implemented!", opcode),
+                                    _ => unknown!(opcode),
                                 }
                             }
 
-                            _ => panic!("The opcode {} is not implemented!", opcode),
+                            _ => unknown!(opcode),
                         }
                     }
 
                     3 => {
-                        let reg = match p {
-                            0 => Reg16::BC,
-                            1 => Reg16::DE,
-                            2 => Reg16::HL,
-                            3 => Reg16::SP,
-                            _ => panic!("The opcode {} is not implemented!", opcode),
-                        };
+                        let reg = match_rp!(p);
 
                         match q {
                             // INC rr
@@ -314,7 +318,7 @@ impl CPU {
 
                             // DEC rr
                             1 => self.reg.set_reg16(reg, self.reg.get_reg16(reg) - 1),
-                            _ => panic!("The opcode {} is not implemented!", opcode),
+                            _ => unknown!(opcode),
                         }
                     }
 
@@ -336,7 +340,7 @@ impl CPU {
                             4 => Reg8::H,
                             5 => Reg8::L,
                             7 => Reg8::A,
-                            _ => panic!("The opcode {} is not implemented!", opcode),
+                            _ => unknown!(opcode),
                         };
 
                         self.reg.set_reg8(reg, self.reg.get_reg8(reg) + 1);
@@ -360,7 +364,7 @@ impl CPU {
                             4 => Reg8::H,
                             5 => Reg8::L,
                             7 => Reg8::A,
-                            _ => panic!("The opcode {} is not implemented!", opcode),
+                            _ => unknown!(opcode),
                         };
 
                         self.reg.set_reg8(reg, self.reg.get_reg8(reg) - 1);
@@ -384,7 +388,7 @@ impl CPU {
                             4 => Reg8::H,
                             5 => Reg8::L,
                             7 => Reg8::A,
-                            _ => panic!("The opcode {} is not implemented!", opcode),
+                            _ => unknown!(opcode),
                         };
 
                         self.reg.set_reg8(reg, n);
@@ -479,11 +483,11 @@ impl CPU {
                                 self.reg.set_flag(Flag::N, false);
                             }
 
-                            _ => panic!("The opcode {} is not implemented!", opcode),
+                            _ => unknown!(opcode),
                         }
                     }
 
-                    _ => panic!("The opcode '{}' is not implemented!", opcode),
+                    _ => unknown!(opcode),
                 }
             }
             1 => {
@@ -504,7 +508,7 @@ impl CPU {
                             4 => Reg8::H,
                             5 => Reg8::L,
                             7 => Reg8::A,
-                            _ => panic!("The opcode '{}' is not implemented!", opcode),
+                            _ => unknown!(opcode),
                         };
                         self.reg.set_reg8(dst, src);
                         return;
@@ -518,7 +522,7 @@ impl CPU {
                         4 => Reg8::H,
                         5 => Reg8::L,
                         7 => Reg8::A,
-                        _ => panic!("The opcode '{}' is not implemented!", opcode),
+                        _ => unknown!(opcode),
                     };
                     let dst = match z {
                         0 => Reg8::B,
@@ -528,7 +532,7 @@ impl CPU {
                         4 => Reg8::H,
                         5 => Reg8::L,
                         7 => Reg8::A,
-                        _ => panic!("The opcode '{}' is not implemented!", opcode),
+                        _ => unknown!(opcode),
                     };
 
                     self.reg.set_reg8(dst, self.reg.get_reg8(src));
@@ -540,10 +544,230 @@ impl CPU {
             }
             2 => {
                 // alu[y] r[z]
+                let val: u8;
+                let reg = match z {
+                    0 => Reg8::B,
+                    1 => Reg8::C,
+                    2 => Reg8::D,
+                    3 => Reg8::E,
+                    4 => Reg8::H,
+                    5 => Reg8::L,
+                    7 => Reg8::A,
+                    _ => unknown!(opcode),
+                };
+
+                if z != 6 {
+                    val = self.reg.get_reg8(reg);
+                } else {
+                    val = self.mem.read(self.reg.get_reg16(Reg16::HL) as usize);
+                }
+
+                match y {
+                    0 => {
+                        // ADD A, r
+                        let a = self.reg.get_reg8(Reg8::A);
+                        let sum = a.overflowing_add(val);
+                        self.reg.set_flag(Flag::C, sum.1);
+                        self.reg
+                            .set_flag(Flag::H, (a & 0x0F + val & 0x0F) & 0x10 == 0x10);
+                        self.reg.set_flag(Flag::N, false);
+                        self.reg.set_flag(Flag::Z, sum.0 == 0);
+                    }
+
+                    1 => {
+                        // ADC A, r
+                        let src = self.reg.get_reg8(reg);
+                        let cy = self.reg.get_flag(Flag::C) as u8;
+                        let add = self.reg.get_reg8(Reg8::A);
+                        let sum = add.wrapping_add(src).wrapping_add(cy);
+                        self.reg.set_reg8(Reg8::A, sum);
+                        self.reg.set_flag(Flag::Z, sum == 0);
+                        self.reg.set_flag(Flag::N, false);
+                        self.reg
+                            .set_flag(Flag::H, (((src & 0x0F) + (add & 0x0F) + cy) & 0x10) != 0);
+                        self.reg.set_flag(
+                            Flag::C,
+                            ((src as u16 + add as u16 + cy as u16) & 0x0100) != 0,
+                        );
+                    }
+
+                    2 => {
+                        // SUB r
+                        let a = self.reg.get_reg8(Reg8::A);
+                        let sub = a.overflowing_sub(val);
+                        self.reg.set_reg8(Reg8::A, sub.0);
+                        self.reg.set_flag(Flag::Z, sub.0 == 0);
+                        self.reg.set_flag(Flag::N, true);
+                        self.reg
+                            .set_flag(Flag::H, (a & 0x0F - val & 0x0F) & 0x10 == 0x10);
+                        self.reg.set_flag(Flag::C, sub.1);
+                    }
+
+                    3 => {
+                        // SBC A, r
+                        let src = self.reg.get_reg8(reg);
+                        let cy = self.reg.get_flag(Flag::C) as u8;
+                        let sub = self.reg.get_reg8(Reg8::A);
+                        let sum = sub.wrapping_sub(src).wrapping_sub(cy);
+                        self.reg.set_reg8(Reg8::A, sum);
+                        self.reg.set_flag(Flag::Z, sum == 0);
+                        self.reg.set_flag(Flag::N, true);
+                        self.reg
+                            .set_flag(Flag::H, (((sub & 0x0F) - (src & 0x0F) - cy) & 0x10) != 0);
+                        self.reg.set_flag(
+                            Flag::C,
+                            ((sub as u16 - src as u16 - cy as u16) & 0x0100) != 0,
+                        );
+                    }
+
+                    4 => {
+                        // AND r
+                        let a = self.reg.get_reg8(Reg8::A);
+                        let and = a & val;
+                        self.reg.set_reg8(Reg8::A, and);
+                        self.reg.set_flag(Flag::Z, and == 0);
+                        self.reg.set_flag(Flag::N, false);
+                        self.reg.set_flag(Flag::H, true);
+                        self.reg.set_flag(Flag::C, false);
+                    }
+
+                    5 => {
+                        // XOR r
+                        let a = self.reg.get_reg8(Reg8::A);
+                        let xor = a ^ val;
+                        self.reg.set_reg8(Reg8::A, xor);
+                        self.reg.set_flag(Flag::Z, xor == 0);
+                        self.reg.set_flag(Flag::N, false);
+                        self.reg.set_flag(Flag::H, false);
+                        self.reg.set_flag(Flag::C, false);
+                    }
+
+                    6 => {
+                        // OR r
+                        let a = self.reg.get_reg8(Reg8::A);
+                        let or = a | val;
+                        self.reg.set_reg8(Reg8::A, or);
+                        self.reg.set_flag(Flag::Z, or == 0);
+                        self.reg.set_flag(Flag::N, false);
+                        self.reg.set_flag(Flag::H, false);
+                        self.reg.set_flag(Flag::C, false);
+                    }
+
+                    7 => {
+                        // CP r
+                        let a = self.reg.get_reg8(Reg8::A);
+                        let sub = a.overflowing_sub(val);
+                        self.reg.set_flag(Flag::Z, sub.0 == 0);
+                        self.reg.set_flag(Flag::N, true);
+                        self.reg
+                            .set_flag(Flag::H, (a & 0x0F - val & 0x0F) & 0x10 == 0x10);
+                        self.reg.set_flag(Flag::C, sub.1);
+                    }
+
+                    _ => unknown!(opcode),
+                }
             }
-            _ => panic!("The opcode '{}' is not implemented!", opcode),
+            3 => {
+                match z {
+                    0 => {
+                        match y {
+                            0..=3 => {
+                                // RET cc
+                                // Return if condition code cc is true
+                                if check_cc!(y) {
+                                    let lsb = self.mem.read(self.reg.get_reg16(Reg16::SP) as usize);
+                                    let msb =
+                                        self.mem.read(self.reg.get_reg16(Reg16::SP) as usize + 1);
+                                    self.pc = (msb as u16) << 8 | lsb as u16;
+                                    self.reg
+                                        .set_reg16(Reg16::SP, self.reg.get_reg16(Reg16::SP) + 2);
+                                }
+                            }
+
+                            4 => {
+                                // LD (0xFF00 + n), A
+                                let a = self.reg.get_reg8(Reg8::A);
+                                let n = self.fetch();
+                                self.mem.write((n as u16 + 0xFF00) as usize, a);
+                            }
+
+                            5 => {
+                                // ADD SP, d
+                                let sp = self.reg.get_reg16(Reg16::SP);
+                                let n = self.fetch();
+                                let sum = sp.overflowing_add_signed(n as i16);
+
+                                // Check half-carry
+                                self.reg.set_flag(
+                                    Flag::H,
+                                    (((sp & 0xFFF) + (n as u16 & 0xFFF)) & 0x1000) == 0x1000,
+                                );
+
+                                // Check carry
+                                self.reg.set_flag(Flag::C, sum.1);
+
+                                // Subtraction flag
+                                self.reg.set_flag(Flag::N, false);
+
+                                self.reg.set_reg16(Reg16::SP, sum.0);
+                            }
+
+                            6 => {
+                                // LD A, (0xFF00 + n)
+                                let n = self.fetch();
+                                self.reg
+                                    .set_reg8(Reg8::A, self.mem.read((n as u16 + 0xFF00) as usize));
+                            }
+
+                            7 => {
+                                // LD HL, SP + d
+                                let sp = self.reg.get_reg16(Reg16::SP);
+                                let n = self.fetch();
+                                let sum = sp.overflowing_add_signed(n as i16);
+                                self.reg.set_reg16(Reg16::HL, sum.0);
+                                self.reg.set_flag(Flag::C, sum.1);
+                                self.reg.set_flag(
+                                    Flag::H,
+                                    (((sp & 0xFFF) + (n as u16 & 0xFFF)) & 0x1000) == 0x1000,
+                                );
+                            }
+
+                            _ => unknown!(opcode),
+                        }
+                    }
+                    1 => {
+                        match q {
+                            0 => {
+                                // POP rr
+                                let sp = self.reg.get_reg16(Reg16::SP);
+                                let lsb = self.mem.read(sp as usize);
+                                let msb = self.mem.read(sp as usize + 1);
+                                let rr = match_rp2!(p);
+                                self.reg.set_reg16(rr, (msb as u16) << 8 | lsb as u16);
+                                self.reg
+                                    .set_reg16(Reg16::SP, self.reg.get_reg16(Reg16::SP) + 2);
+                            }
+                            1 => match p {
+                                0 => {
+                                    // RET
+                                    let lsb = self.mem.read(self.reg.get_reg16(Reg16::SP) as usize);
+                                    let msb =
+                                        self.mem.read(self.reg.get_reg16(Reg16::SP) as usize + 1);
+                                    self.pc = (msb as u16) << 8 | lsb as u16;
+                                    self.reg
+                                        .set_reg16(Reg16::SP, self.reg.get_reg16(Reg16::SP) + 2);
+                                }
+                                _ => unknown!(opcode),
+                            },
+                            _ => unknown!(opcode),
+                        }
+                    }
+                    _ => unknown!(opcode),
+                }
+            }
+            _ => unknown!(opcode),
         }
     }
 
-    fn execute_cb(&self, opcode: u8) {}
+    fn execute_cb(&self, _opcode: u8) {}
 }
