@@ -6,6 +6,8 @@ use crate::registers::*;
 #[allow(dead_code)]
 pub struct CPU {
     pc: u16,
+    ime: bool,
+    ime_scheduled: bool,
     mem: Memory,
     reg: Registers,
 }
@@ -15,6 +17,8 @@ impl CPU {
     pub fn new() -> CPU {
         CPU {
             pc: 0x100,
+            ime: false,
+            ime_scheduled: false,
             mem: Memory::new(0xFFFF),
             reg: Registers::new(),
         }
@@ -757,10 +761,280 @@ impl CPU {
                                     self.reg
                                         .set_reg16(Reg16::SP, self.reg.get_reg16(Reg16::SP) + 2);
                                 }
+
+                                1 => {
+                                    // RETI
+                                    let lsb = self.mem.read(self.reg.get_reg16(Reg16::SP) as usize);
+                                    let msb =
+                                        self.mem.read(self.reg.get_reg16(Reg16::SP) as usize + 1);
+                                    self.pc = (msb as u16) << 8 | lsb as u16;
+                                    self.reg
+                                        .set_reg16(Reg16::SP, self.reg.get_reg16(Reg16::SP) + 2);
+                                    self.ime = true;
+                                }
+
+                                2 => {
+                                    // JP HL
+                                    self.pc = self.reg.get_reg16(Reg16::HL);
+                                }
+
+                                3 => {
+                                    // LD SP, HL
+                                    self.reg.set_reg16(Reg16::SP, self.reg.get_reg16(Reg16::HL));
+                                }
+
                                 _ => unknown!(opcode),
                             },
                             _ => unknown!(opcode),
                         }
+                    }
+                    2 => {
+                        match y {
+                            0..=3 => {
+                                // JP cc, nn
+                                let nn_lsb = self.fetch();
+                                let nn_msb = self.fetch();
+                                let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
+                                if check_cc!(y) {
+                                    self.pc = nn;
+                                }
+                            }
+
+                            4 => {
+                                // LD (0xFF00 + C), A
+                                let a = self.reg.get_reg8(Reg8::A);
+                                let c = self.reg.get_reg8(Reg8::C);
+                                self.mem.write((c as u16 + 0xFF00) as usize, a);
+                            }
+
+                            5 => {
+                                // LD (nn), A
+                                let nn_lsb = self.fetch();
+                                let nn_msb = self.fetch();
+                                let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
+                                let a = self.reg.get_reg8(Reg8::A);
+                                self.mem.write(nn as usize, a);
+                            }
+
+                            6 => {
+                                // LD A, (0xFF00 + C)
+                                let c = self.reg.get_reg8(Reg8::C);
+                                self.reg
+                                    .set_reg8(Reg8::A, self.mem.read((c as u16 + 0xFF00) as usize));
+                            }
+
+                            7 => {
+                                // LD A, nn
+                                let nn_lsb = self.fetch();
+                                let nn_msb = self.fetch();
+                                let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
+                                self.reg.set_reg8(Reg8::A, self.mem.read(nn as usize));
+                            }
+
+                            _ => unknown!(opcode),
+                        }
+                    }
+                    3 => {
+                        match y {
+                            0 => {
+                                // JP nn
+                                let nn_lsb = self.fetch();
+                                let nn_msb = self.fetch();
+                                let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
+                                self.pc = nn;
+                            }
+
+                            1 => {
+                                // CB prefix
+                                let opcode = self.fetch();
+                                self.execute_cb(opcode);
+                            }
+
+                            6 => {
+                                // DI
+                                self.ime = false;
+                            }
+
+                            7 => {
+                                // EI
+                                self.ime_scheduled = true;
+                            }
+
+                            _ => unknown!(opcode),
+                        }
+                    }
+                    4 => {
+                        match y {
+                            0..=3 => {
+                                // CALL cc, nn
+                                let nn_lsb = self.fetch();
+                                let nn_msb = self.fetch();
+                                let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
+                                if check_cc!(y) {
+                                    let mut sp = self.reg.get_reg16(Reg16::SP);
+                                    self.mem.write((sp - 1) as usize, (self.pc >> 8) as u8);
+                                    self.mem.write((sp - 2) as usize, (self.pc & 0xFF) as u8);
+                                    sp -= 2;
+                                    self.reg.set_reg16(Reg16::SP, sp);
+                                    self.pc = nn;
+                                }
+                            }
+                            _ => unknown!(opcode),
+                        }
+                    }
+                    5 => {
+                        match q {
+                            0 => {
+                                // PUSH rr
+                                let rr = match_rp2!(p);
+                                let reg = self.reg.get_reg16(rr);
+                                let mut sp = self.reg.get_reg16(Reg16::SP);
+                                self.mem.write((sp - 1) as usize, (reg >> 8) as u8);
+                                self.mem.write((sp - 2) as usize, (reg & 0xFF) as u8);
+                                sp -= 2;
+                                self.reg.set_reg16(Reg16::SP, sp);
+                            }
+
+                            1 => {
+                                match p {
+                                    0 => {
+                                        // CALL nn
+                                        let nn_lsb = self.fetch();
+                                        let nn_msb = self.fetch();
+                                        let nn = (nn_msb as u16) << 8 | nn_lsb as u16;
+                                        let mut sp = self.reg.get_reg16(Reg16::SP);
+                                        self.mem.write((sp - 1) as usize, (self.pc >> 8) as u8);
+                                        self.mem.write((sp - 2) as usize, (self.pc & 0xFF) as u8);
+                                        sp -= 2;
+                                        self.reg.set_reg16(Reg16::SP, sp);
+                                        self.pc = nn;
+                                    }
+                                    _ => unknown!(opcode),
+                                }
+                            }
+
+                            _ => unknown!(opcode),
+                        }
+                    }
+                    6 => {
+                        let val = self.fetch();
+                        match y {
+                            0 => {
+                                // ADD A, r
+                                let a = self.reg.get_reg8(Reg8::A);
+                                let sum = a.overflowing_add(val);
+                                self.reg.set_flag(Flag::C, sum.1);
+                                self.reg
+                                    .set_flag(Flag::H, (a & 0x0F + val & 0x0F) & 0x10 == 0x10);
+                                self.reg.set_flag(Flag::N, false);
+                                self.reg.set_flag(Flag::Z, sum.0 == 0);
+                            }
+
+                            1 => {
+                                // ADC A, r
+                                let src = val;
+                                let cy = self.reg.get_flag(Flag::C) as u8;
+                                let add = self.reg.get_reg8(Reg8::A);
+                                let sum = add.wrapping_add(src).wrapping_add(cy);
+                                self.reg.set_reg8(Reg8::A, sum);
+                                self.reg.set_flag(Flag::Z, sum == 0);
+                                self.reg.set_flag(Flag::N, false);
+                                self.reg.set_flag(
+                                    Flag::H,
+                                    (((src & 0x0F) + (add & 0x0F) + cy) & 0x10) != 0,
+                                );
+                                self.reg.set_flag(
+                                    Flag::C,
+                                    ((src as u16 + add as u16 + cy as u16) & 0x0100) != 0,
+                                );
+                            }
+
+                            2 => {
+                                // SUB r
+                                let a = self.reg.get_reg8(Reg8::A);
+                                let sub = a.overflowing_sub(val);
+                                self.reg.set_reg8(Reg8::A, sub.0);
+                                self.reg.set_flag(Flag::Z, sub.0 == 0);
+                                self.reg.set_flag(Flag::N, true);
+                                self.reg
+                                    .set_flag(Flag::H, (a & 0x0F - val & 0x0F) & 0x10 == 0x10);
+                                self.reg.set_flag(Flag::C, sub.1);
+                            }
+
+                            3 => {
+                                // SBC A, r
+                                let src = val;
+                                let cy = self.reg.get_flag(Flag::C) as u8;
+                                let sub = self.reg.get_reg8(Reg8::A);
+                                let sum = sub.wrapping_sub(src).wrapping_sub(cy);
+                                self.reg.set_reg8(Reg8::A, sum);
+                                self.reg.set_flag(Flag::Z, sum == 0);
+                                self.reg.set_flag(Flag::N, true);
+                                self.reg.set_flag(
+                                    Flag::H,
+                                    (((sub & 0x0F) - (src & 0x0F) - cy) & 0x10) != 0,
+                                );
+                                self.reg.set_flag(
+                                    Flag::C,
+                                    ((sub as u16 - src as u16 - cy as u16) & 0x0100) != 0,
+                                );
+                            }
+
+                            4 => {
+                                // AND r
+                                let a = self.reg.get_reg8(Reg8::A);
+                                let and = a & val;
+                                self.reg.set_reg8(Reg8::A, and);
+                                self.reg.set_flag(Flag::Z, and == 0);
+                                self.reg.set_flag(Flag::N, false);
+                                self.reg.set_flag(Flag::H, true);
+                                self.reg.set_flag(Flag::C, false);
+                            }
+
+                            5 => {
+                                // XOR r
+                                let a = self.reg.get_reg8(Reg8::A);
+                                let xor = a ^ val;
+                                self.reg.set_reg8(Reg8::A, xor);
+                                self.reg.set_flag(Flag::Z, xor == 0);
+                                self.reg.set_flag(Flag::N, false);
+                                self.reg.set_flag(Flag::H, false);
+                                self.reg.set_flag(Flag::C, false);
+                            }
+
+                            6 => {
+                                // OR r
+                                let a = self.reg.get_reg8(Reg8::A);
+                                let or = a | val;
+                                self.reg.set_reg8(Reg8::A, or);
+                                self.reg.set_flag(Flag::Z, or == 0);
+                                self.reg.set_flag(Flag::N, false);
+                                self.reg.set_flag(Flag::H, false);
+                                self.reg.set_flag(Flag::C, false);
+                            }
+
+                            7 => {
+                                // CP r
+                                let a = self.reg.get_reg8(Reg8::A);
+                                let sub = a.overflowing_sub(val);
+                                self.reg.set_flag(Flag::Z, sub.0 == 0);
+                                self.reg.set_flag(Flag::N, true);
+                                self.reg
+                                    .set_flag(Flag::H, (a & 0x0F - val & 0x0F) & 0x10 == 0x10);
+                                self.reg.set_flag(Flag::C, sub.1);
+                            }
+
+                            _ => unknown!(opcode),
+                        }
+                    }
+                    7 => {
+                        // RST y * 8
+                        let mut sp = self.reg.get_reg16(Reg16::SP);
+                        self.mem.write((sp - 1) as usize, (self.pc >> 8) as u8);
+                        self.mem.write((sp - 2) as usize, (self.pc & 0xFF) as u8);
+                        sp -= 2;
+                        self.reg.set_reg16(Reg16::SP, sp);
+                        self.pc = y as u16 * 8;
                     }
                     _ => unknown!(opcode),
                 }
@@ -770,4 +1044,6 @@ impl CPU {
     }
 
     fn execute_cb(&self, _opcode: u8) {}
+
+    fn m_cycle(&mut self) {}
 }
