@@ -1,3 +1,5 @@
+use core::panic;
+
 use crate::memory::Memory;
 use crate::registers::*;
 
@@ -50,7 +52,7 @@ impl CPU {
         // For unknown opcode
         macro_rules! unknown {
             ($opcode: expr) => {{
-                panic!("The opcode '{}' is not implemented!", opcode);
+                panic!("The opcode '{:02X}' is not implemented!", opcode);
             }};
         }
 
@@ -400,9 +402,11 @@ impl CPU {
 
                     7 => {
                         match y {
+                            // FIXME: probably something wrong down there
+                            // not sure about carry flag
                             0 => {
                                 // RLCA
-                                let c: bool = (self.reg.get_reg8(Reg8::A) & 0x80) != 0;
+                                let c: bool = self.reg.get_flag(Flag::C);
                                 let new_a = self.reg.get_reg8(Reg8::A) << 1 | c as u8;
                                 self.reg.set_reg8(Reg8::A, new_a);
                                 self.reg.set_flag(Flag::C, c);
@@ -413,7 +417,7 @@ impl CPU {
 
                             1 => {
                                 // RRCA
-                                let c: bool = (self.reg.get_reg8(Reg8::A) & 0x01) != 0;
+                                let c: bool = self.reg.get_flag(Flag::C);
                                 let new_a = self.reg.get_reg8(Reg8::A) >> 1 | (c as u8) << 7;
                                 self.reg.set_reg8(Reg8::A, new_a);
                                 self.reg.set_flag(Flag::C, c);
@@ -424,7 +428,7 @@ impl CPU {
 
                             2 => {
                                 // RLA
-                                let c: bool = (self.reg.get_reg8(Reg8::A) & 0x80) != 0;
+                                let c: bool = self.reg.get_flag(Flag::C);
                                 let new_a = self.reg.get_reg8(Reg8::A) << 1
                                     | self.reg.get_flag(Flag::C) as u8;
                                 self.reg.set_reg8(Reg8::A, new_a);
@@ -436,7 +440,7 @@ impl CPU {
 
                             3 => {
                                 // RRA
-                                let c: bool = (self.reg.get_reg8(Reg8::A) & 0x01) != 0;
+                                let c: bool = self.reg.get_flag(Flag::C);
                                 let new_a = self.reg.get_reg8(Reg8::A) >> 1
                                     | (self.reg.get_flag(Flag::C) as u8) << 7;
                                 self.reg.set_reg8(Reg8::A, new_a);
@@ -1043,7 +1047,216 @@ impl CPU {
         }
     }
 
-    fn execute_cb(&self, _opcode: u8) {}
+    fn execute_cb(&mut self, opcode: u8) {
+        let x = (opcode & 0b11000000) >> 6;
+        let y = (opcode & 0b00111000) >> 3;
+        let z = opcode & 0b00000111;
+
+        macro_rules! unknown {
+            ($opcode: expr) => {{
+                panic!("Unknown opcode: {:02X}", $opcode);
+            }};
+        }
+
+        match x {
+            0 => {
+                let reg = match z {
+                    0 => Reg8::B,
+                    1 => Reg8::C,
+                    2 => Reg8::D,
+                    3 => Reg8::E,
+                    4 => Reg8::H,
+                    5 => Reg8::L,
+                    7 => Reg8::A,
+                    _ => unknown!(opcode),
+                };
+
+                let regv = match z {
+                    6 => self.mem.read(self.reg.get_reg16(Reg16::HL) as usize),
+                    _ => self.reg.get_reg8(reg),
+                };
+
+                let n_regv = match y {
+                    0 => {
+                        // RLC r
+                        let c = regv & 0x80 == 0x80;
+                        let new_regv = regv << 1 | c as u8;
+                        self.reg.set_flag(Flag::C, c);
+                        self.reg.set_flag(Flag::Z, new_regv == 0);
+                        self.reg.set_flag(Flag::H, false);
+                        self.reg.set_flag(Flag::N, false);
+
+                        new_regv
+                    }
+
+                    1 => {
+                        // RRC
+                        let c = regv & 0x01 == 0x01;
+                        let new_regv = regv >> 1 | (c as u8) << 7;
+                        self.reg.set_flag(Flag::C, c);
+                        self.reg.set_flag(Flag::Z, new_regv == 0);
+                        self.reg.set_flag(Flag::H, false);
+                        self.reg.set_flag(Flag::N, false);
+
+                        new_regv
+                    }
+
+                    2 => {
+                        // RL
+                        let c = regv & 0x80 == 0x80;
+                        let new_regv = regv << 1 | self.reg.get_flag(Flag::C) as u8;
+                        self.reg.set_flag(Flag::C, c);
+                        self.reg.set_flag(Flag::Z, new_regv == 0);
+                        self.reg.set_flag(Flag::H, false);
+                        self.reg.set_flag(Flag::N, false);
+
+                        new_regv
+                    }
+
+                    3 => {
+                        // RR
+                        let c = regv & 0x01 == 0x01;
+                        let new_regv = regv >> 1 | (self.reg.get_flag(Flag::C) as u8) << 7;
+                        self.reg.set_reg8(reg, new_regv);
+                        self.reg.set_flag(Flag::C, c);
+                        self.reg.set_flag(Flag::Z, new_regv == 0);
+                        self.reg.set_flag(Flag::H, false);
+                        self.reg.set_flag(Flag::N, false);
+
+                        new_regv
+                    }
+
+                    4 => {
+                        // SLA
+                        let c = regv & 0x80 == 0x80;
+                        let new_regv = regv << 1;
+                        self.reg.set_flag(Flag::C, c);
+                        self.reg.set_flag(Flag::Z, new_regv == 0);
+                        self.reg.set_flag(Flag::H, false);
+                        self.reg.set_flag(Flag::N, false);
+
+                        new_regv
+                    }
+
+                    5 => {
+                        // SRA
+                        let c = regv & 0x01 == 0x01;
+                        let new_regv = regv >> 1 | (regv & 0x80);
+                        self.reg.set_flag(Flag::C, c);
+                        self.reg.set_flag(Flag::Z, new_regv == 0);
+                        self.reg.set_flag(Flag::H, false);
+                        self.reg.set_flag(Flag::N, false);
+
+                        new_regv
+                    }
+
+                    6 => {
+                        // SWAP
+                        let new_regv = (regv & 0x0F) << 4 | (regv & 0xF0) >> 4;
+                        
+                        new_regv
+                    }
+
+                    7 => {
+                        let c = regv & 0x01 == 0x01;
+                        let new_regv = regv >> 1;
+                        self.reg.set_flag(Flag::C, c);
+                        self.reg.set_flag(Flag::Z, new_regv == 0);
+                        self.reg.set_flag(Flag::H, false);
+                        self.reg.set_flag(Flag::N, false);
+
+                        new_regv
+                    }
+                    _ => unknown!(opcode),
+                
+                };
+            
+                match z {
+                    6 => self.mem.write(self.reg.get_reg16(Reg16::HL) as usize, n_regv),
+                    _ => self.reg.set_reg8(reg, n_regv),
+                }
+            }
+            
+            1 => {
+                // BIT y, r[z]
+                let reg = match z {
+                    0 => Reg8::B,
+                    1 => Reg8::C,
+                    2 => Reg8::D,
+                    3 => Reg8::E,
+                    4 => Reg8::H,
+                    5 => Reg8::L,
+                    7 => Reg8::A,
+                    _ => unknown!(opcode),
+                };
+
+                let regv = match z {
+                    6 => self.mem.read(self.reg.get_reg16(Reg16::HL) as usize),
+                    _ => self.reg.get_reg8(reg),
+                };
+
+                let bit = regv & (1 << y) != 0;
+
+                self.reg.set_flag(Flag::Z, bit);
+                self.reg.set_flag(Flag::H, true);
+                self.reg.set_flag(Flag::N, false);   
+            }
+
+            2 => {
+                // RES y, r[z]
+                let reg = match z {
+                    0 => Reg8::B,
+                    1 => Reg8::C,
+                    2 => Reg8::D,
+                    3 => Reg8::E,
+                    4 => Reg8::H,
+                    5 => Reg8::L,
+                    7 => Reg8::A,
+                    _ => unknown!(opcode),
+                };
+
+                let regv = match z {
+                    6 => self.mem.read(self.reg.get_reg16(Reg16::HL) as usize),
+                    _ => self.reg.get_reg8(reg),
+                };
+
+                let n_regv = regv & !(1 << y);
+
+                match z {
+                    6 => self.mem.write(self.reg.get_reg16(Reg16::HL) as usize, n_regv),
+                    _ => self.reg.set_reg8(reg, n_regv),
+                }
+            }
+
+            3 => {
+                // SET y, r[z]
+                let reg = match z {
+                    0 => Reg8::B,
+                    1 => Reg8::C,
+                    2 => Reg8::D,
+                    3 => Reg8::E,
+                    4 => Reg8::H,
+                    5 => Reg8::L,
+                    7 => Reg8::A,
+                    _ => unknown!(opcode),
+                };
+
+                let regv = match z {
+                    6 => self.mem.read(self.reg.get_reg16(Reg16::HL) as usize),
+                    _ => self.reg.get_reg8(reg),
+                };
+
+                let n_regv = regv | (1 << y);
+
+                match z {
+                    6 => self.mem.write(self.reg.get_reg16(Reg16::HL) as usize, n_regv),
+                    _ => self.reg.set_reg8(reg, n_regv),
+                }
+            }
+
+            _ => unknown!(opcode),
+        }
+    }
 
     fn m_cycle(&mut self) {}
 }
