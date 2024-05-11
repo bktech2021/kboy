@@ -30,11 +30,11 @@ impl Memory {
         }
     }
 
-    pub fn read(&self, addr: usize) -> u8 {
-        self.data[addr]
+    pub fn read(&self, addr: u16) -> u8 {
+        self.data[addr as usize]
     }
 
-    pub fn write(&mut self, addr: usize, data: u8) -> () {
-        self.data[addr] = data;
+    pub fn write(&mut self, addr: u16, data: u8) -> () {
+        self.data[addr as usize] = data;
     }
 }
